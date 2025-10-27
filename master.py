@@ -9,22 +9,17 @@ import time
 
 print("--- Live Trading Bot Initializing ---")
 
-# --- FINANCIAL & STRATEGY CONFIGURATION ---
 RISK_PER_TRADE_PERCENT = 1.0
 CONTRACT_SIZE = 100000
 MAX_LOT_SIZE = 50.0
 MIN_RISK_PIPS = 2.0
 RR_RATIO = 2.0
-MAGIC_NUMBER = 12345 # A unique ID for trades placed by this bot
-
-# --- FILE & MT5 CONFIGURATION ---
+MAGIC_NUMBER = 777
 OUTPUT_DIRECTORY = "output/"
 SYMBOL = "EURUSD"
 TIMEFRAME = mt5.TIMEFRAME_M5
 MODEL_FILENAME = f"{SYMBOL.lower()}_model.joblib"
 
-# --- HELPER FUNCTIONS (Indicators) ---
-# Note: These are adapted to work on live data from MT5
 def calculate_rsi(data, window=14):
     delta = data.diff()
     gain = delta.where(delta > 0, 0).rolling(window=window, min_periods=1).mean()
@@ -45,14 +40,12 @@ def calculate_daily_vwap(df):
     df['cumulative_tpv'] = df.groupby(df.index.date)['typical_price_volume'].cumsum()
     return df['cumulative_tpv'] / df['cumulative_volume']
 
-# --- MAIN BOT LOGIC ---
 def run_live_bot():
     print("--- Connecting to MetaTrader 5 terminal... ---")
     if not mt5.initialize():
         print("initialize() failed, error code =", mt5.last_error())
         return
 
-    # Load the trained model
     print("--- Loading the predictive model... ---")
     model_path = os.path.join(OUTPUT_DIRECTORY, MODEL_FILENAME)
     if not os.path.exists(model_path):
@@ -62,7 +55,6 @@ def run_live_bot():
     model = joblib.load(model_path)
     print("--- Model loaded successfully. Bot is now running. ---")
     
-    # Get symbol properties
     symbol_info = mt5.symbol_info(SYMBOL)
     if symbol_info is None:
         print(f"{SYMBOL} not found on broker.")
@@ -72,14 +64,12 @@ def run_live_bot():
 
     try:
         while True:
-            # --- 1. Time Synchronization: Wait for a new M5 candle ---
             now_utc = datetime.now(pytz.utc)
             next_candle_time = now_utc.replace(second=0, microsecond=0) + timedelta(minutes=5 - (now_utc.minute % 5))
             sleep_seconds = (next_candle_time - now_utc).total_seconds()
             print(f"Current time: {now_utc.strftime('%H:%M:%S')}. Waiting for {sleep_seconds:.1f}s until next candle at {next_candle_time.strftime('%H:%M:%S')}...")
             time.sleep(sleep_seconds)
 
-            # --- 2. Check for Open Positions managed by this bot ---
             positions = mt5.positions_get(symbol=SYMBOL)
             my_position = None
             if positions:
@@ -88,9 +78,7 @@ def run_live_bot():
                         my_position = pos
                         break
             
-            # --- 3. Live Trade Management (Trailing Stop) ---
             if my_position:
-                # If trade is already at breakeven (sl == open_price), do nothing
                 if my_position.sl == my_position.price_open:
                     print(f"Trade #{my_position.ticket} is active and already at breakeven. Monitoring...")
                     continue
@@ -107,11 +95,8 @@ def run_live_bot():
                         "tp": my_position.tp,
                     }
                     mt5.order_send(request)
-                # (Similar logic for SELL would be needed if BE price is calculated differently)
-                continue # Skip new trade entry while managing an open one
-
-            # --- 4. Fetch Live Data & Calculate Features ---
-            # Fetch enough data for indicators (e.g., last 50 candles)
+                continue 
+                
             rates_m5_df = pd.DataFrame(mt5.copy_rates_from_pos(SYMBOL, TIMEFRAME, 0, 50))
             rates_m5_df['time'] = pd.to_datetime(rates_m5_df['time'], unit='s', utc=True)
             rates_m5_df.set_index('time', inplace=True)
@@ -120,7 +105,6 @@ def run_live_bot():
             rates_h4_df['time'] = pd.to_datetime(rates_h4_df['time'], unit='s', utc=True)
             rates_h4_df.set_index('time', inplace=True)
 
-            # Calculate indicators for both timeframes
             rates_m5_df['m5_rsi'] = calculate_rsi(rates_m5_df['close'])
             rates_m5_df['m5_bb_upper'], rates_m5_df['m5_bb_lower'] = calculate_bollinger_bands(rates_m5_df['close'])
             rates_m5_df['m5_vwap'] = calculate_daily_vwap(rates_m5_df)
@@ -129,8 +113,7 @@ def run_live_bot():
             rates_h4_df['h4_bb_upper'], rates_h4_df['h4_bb_lower'] = calculate_bollinger_bands(rates_h4_df['close'])
             rates_h4_df['h4_vwap'] = calculate_daily_vwap(rates_h4_df)
 
-            # --- 5. Signal Detection & Prediction ---
-            last_candle = rates_m5_df.iloc[-2] # Analyze the candle that just closed
+            last_candle = rates_m5_df.iloc[-2]
             prev_candle = rates_m5_df.iloc[-3]
 
             is_bullish_reversal = last_candle['close'] > last_candle['open'] and prev_candle['close'] < prev_candle['open']
@@ -138,30 +121,27 @@ def run_live_bot():
 
             if is_bullish_reversal or is_bearish_reversal:
                 print(f"Signal detected at {last_candle.name}. Preparing features...")
-                # Create the feature set for the model
+             
                 features = {}
-                # Lagged M5 features (we need more history for this in a real bot)
+                
                 for i in range(1, 11):
                     features[f'm5_rsi_lag_{i}'] = rates_m5_df['m5_rsi'].iloc[-(i+1)]
-                    # ... Add other lagged features (bb_upper, etc.)
-                
-                # H4 features (find the corresponding H4 candle)
+                   
                 h4_candle = rates_h4_df[rates_h4_df.index <= last_candle.name].iloc[-1]
                 features['h4_rsi'] = h4_candle['h4_rsi']
-                # ... Add other H4 features
+               
                 
                 feature_df = pd.DataFrame([features], columns=model.feature_names_in_)
                 
                 prediction = model.predict(feature_df)[0]
                 trade_direction = 1 if prediction == 1 else -1
 
-                # --- 6. Trade Execution ---
                 print(f"Model predicts: {'BUY' if trade_direction == 1 else 'SELL'}. Validating trade...")
                 
-                if trade_direction == 1: # Buy
+                if trade_direction == 1:
                     sl_price = last_candle['low']
                     risk_points = last_candle['close'] - sl_price
-                else: # Sell
+                else: 
                     sl_price = last_candle['high']
                     risk_points = sl_price - last_candle['close']
 
@@ -203,6 +183,8 @@ def run_live_bot():
         print("--- MetaTrader 5 connection closed. Bot has stopped. ---")
 
 if __name__ == '__main__':
-    # WARNING: This bot will execute LIVE trades. 
-    # Run on a DEMO account first. You are responsible for any financial outcomes.
+
     run_live_bot()
+    
+    # WARNING: This bot will execute LIVE trades. 
+    # Run on a DEMO account first. I'm not responsible for anything
