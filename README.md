@@ -3,7 +3,7 @@
 This is a professional-grade live trading bot written in Python. It runs in a loop and connects directly to the MT5 terminal via the `MetaTrader5` library to execute trades based on a pre-trained machine learning model.
 
 ---
-
+ 
 ## Core Features
 
 * **Time Synchronization:** The bot runs on a loop that waits for the *exact* opening of the next M5 candle. This ensures data is always fresh and synchronized.
