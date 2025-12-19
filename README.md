@@ -116,7 +116,7 @@ The console will display "Waiting for next candle..." and sync with the market.
 ⚠️ **Disclaimer**
 
 <div align="center">
-  High Risk Investment Warning
+  High Risk Investment Warning ⚠️
 </div>
 
 This software executes trades on a live financial account. Algorithmic trading involves significant capital risk.
