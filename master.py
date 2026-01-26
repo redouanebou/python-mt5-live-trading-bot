@@ -9,7 +9,7 @@ import time
 
 print("--- Live Trading Bot Initializing ---")
 
-RISK_PER_TRADE_PERCENT = 1.0
+RISK_PER_TRADE_PERCENT = 0.5  
 CONTRACT_SIZE = 100000
 MAX_LOT_SIZE = 50.0
 MIN_RISK_PIPS = 2.0
@@ -188,3 +188,4 @@ if __name__ == '__main__':
     
     # WARNING: This bot will execute LIVE trades. 
     # Run on a DEMO account first. I'm not responsible for anything
+
